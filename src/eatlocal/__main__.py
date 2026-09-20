@@ -10,11 +10,13 @@ from rich.status import Status
 from . import __version__
 from .constants import EATLOCAL_HOME
 from .eatlocal import (
+    all_bites,
     choose_bite,
     choose_local_bite,
     create_bite_dir,
     display_bite,
     download_bite,
+    download_bites,
     initialize_eatlocal,
     load_config,
     submit_bite,
@@ -84,9 +86,28 @@ def download(
         is_flag=True,
         help="Write the original template instead of your latest submission.",
     ),
+    bulk: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        is_flag=True,
+        help="Download every bite instead of picking one. Pairs with --level.",
+    ),
 ) -> None:
     """Download and extract bite code from pybitesplatform.com."""
     config = load_config(EATLOCAL_HOME / ".env")
+
+    if bulk:
+        bites = all_bites(clear, level=level)
+        print(f"Downloading {len(bites)} bites...")
+        written = 0
+        for bite in download_bites(bites, config, reset=reset):
+            if create_bite_dir(bite, config, force):
+                track_local_bites(bite, config)
+                written += 1
+        print(f"Wrote {written} of {len(bites)} bites; {len(bites) - written} skipped.")
+        return
+
     bite = choose_bite(clear, level=level)
     with Status("Downloading bite..."):
         bite.platform_content = download_bite(bite, config, reset=reset)

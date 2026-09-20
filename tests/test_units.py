@@ -9,6 +9,8 @@ import pytest
 
 from eatlocal.eatlocal import (
     Bite,
+    all_bites,
+    fetch_bites,
     choose_bite,
     choose_local_bite,
     create_bite_dir,
@@ -336,5 +338,73 @@ def test_create_bite_dir_prefers_the_template(testing_config) -> None:
         written = (bite_dir / "app.py").read_text()
         assert written == "# Enter your code below this line\n"
         assert "FastAPI()" not in written
+    finally:
+        shutil.rmtree(bite_dir, ignore_errors=True)
+
+
+@patch("eatlocal.eatlocal.requests.get")
+def test_all_bites_skips_the_picker(mock_requests) -> None:
+    """--all returns every Bite without prompting."""
+    mock_requests.return_value = MagicMock(
+        status_code=200,
+        json=MagicMock(
+            return_value=json.load(open("./tests/testing_content/bites_api.json"))
+        ),
+    )
+
+    bites = all_bites()
+
+    assert len(bites) == 3
+    assert all(isinstance(b, Bite) for b in bites)
+    assert "sum-n-numbers" in {b.slug for b in bites}
+
+
+@patch("eatlocal.eatlocal.requests.get")
+def test_all_bites_honours_level(mock_requests) -> None:
+    """--all pairs with --level rather than replacing it."""
+    mock_requests.return_value = MagicMock(
+        status_code=200,
+        json=MagicMock(
+            return_value=json.load(open("./tests/testing_content/bites_api.json"))
+        ),
+    )
+
+    bites = all_bites(level="beginner")
+
+    assert [b.slug for b in bites] == ["sum-n-numbers"]
+
+
+@patch("eatlocal.eatlocal.requests.get")
+def test_fetch_bites_rejects_an_unknown_level(mock_requests, capsys) -> None:
+    """A typo'd level should stop rather than silently download everything."""
+    mock_requests.return_value = MagicMock(
+        status_code=200, json=MagicMock(return_value=[])
+    )
+
+    with pytest.raises(SystemExit):
+        fetch_bites(level="expert")
+    assert "Invalid level" in capsys.readouterr().out
+
+
+def test_create_bite_dir_skips_an_inaccessible_bite(testing_config, capsys) -> None:
+    """A paywalled Bite must not abort a bulk download."""
+    bite = Bite("Premium bite", "premium-bite")
+    bite.platform_content = "<html><body>no editor here</body></html>"
+
+    assert create_bite_dir(bite, testing_config) is False
+    assert "Unable to access" in capsys.readouterr().out
+    assert not (Path(testing_config["PYBITES_REPO"]) / "premium-bite").exists()
+
+
+def test_create_bite_dir_reports_success(testing_config) -> None:
+    """A written Bite reports True so callers can count it."""
+    with open(Path("./tests/testing_content/fastapi_content.txt"), "r") as f:
+        platform_content = f.read()
+    bite = Bite("Fastapi hello world", "fastapi-hello-world")
+    bite.platform_content = platform_content
+    bite_dir = Path(testing_config["PYBITES_REPO"]) / "fastapi-hello-world"
+
+    try:
+        assert create_bite_dir(bite, testing_config) is True
     finally:
         shutil.rmtree(bite_dir, ignore_errors=True)

@@ -8,6 +8,7 @@ from datetime import timedelta
 from os import environ, makedirs
 from pathlib import Path
 from textwrap import dedent
+from collections.abc import Iterator
 from typing import FrozenSet
 
 import install_playwright
@@ -325,11 +326,15 @@ def _unformat_bite_key(formatted_key: str) -> str:
     return " ".join(parts[:-1])
 
 
-def choose_bite(clear: bool = False, *, level: str | None = None) -> Bite:
-    """Choose which level of bite will be downloaded.
+def fetch_bites(clear: bool = False, *, level: str | None = None) -> list[dict]:
+    """Fetch the Bite catalogue, optionally narrowed to one level.
+
+    Args:
+        clear: Clear the requests cache before fetching.
+        level: Only return Bites at this difficulty level.
 
     Returns:
-        A Bite object.
+        A list of Bite dicts as returned by the platform API.
 
     """
     if clear:
@@ -347,40 +352,47 @@ def choose_bite(clear: bool = False, *, level: str | None = None) -> Bite:
             )
             sys.exit()
         bites_data = r.json()
-        if level is not None:
-            if level.lower() not in VALID_LEVELS:
-                console.print(
-                    f":warning: Invalid level: {level}.",
-                    style=ConsoleStyle.WARNING.value,
-                )
-                console.print(
-                    f"Valid levels are: {', '.join(VALID_LEVELS)}.",
-                    style=ConsoleStyle.SUGGESTION.value,
-                )
-                sys.exit()
-            bites = {
-                bite["title"]: bite["slug"]
-                for bite in bites_data
-                if bite["level"].lower() == level.lower()
-            }
-        else:
-            bites = {}
-            max_title_length = 0
-            bite_mapping = {}
+    if level is None:
+        return bites_data
+    if level.lower() not in VALID_LEVELS:
+        console.print(
+            f":warning: Invalid level: {level}.",
+            style=ConsoleStyle.WARNING.value,
+        )
+        console.print(
+            f"Valid levels are: {', '.join(VALID_LEVELS)}.",
+            style=ConsoleStyle.SUGGESTION.value,
+        )
+        sys.exit()
+    return [b for b in bites_data if b["level"].lower() == level.lower()]
 
-            for bite in bites_data:
-                title_length = len(bite["title"])
-                max_title_length = max(max_title_length, title_length)
 
-                bites[bite["title"]] = (bite["level"], bite["slug"])
-                bite_mapping[bite["title"]] = bite["slug"]
-            padding = max_title_length + 10
-            formatted_bites = {
-                _format_bite_key(title, level, padding): slug
-                for title, (level, slug) in bites.items()
-            }
+def choose_bite(clear: bool = False, *, level: str | None = None) -> Bite:
+    """Choose which bite will be downloaded.
 
-    choices = bites if level is not None else formatted_bites
+    Returns:
+        A Bite object.
+
+    """
+    bites_data = fetch_bites(clear, level=level)
+    if level is not None:
+        bites = {bite["title"]: bite["slug"] for bite in bites_data}
+        choices = bites
+        bite_mapping = bites
+    else:
+        bites = {}
+        max_title_length = 0
+        bite_mapping = {}
+        for bite in bites_data:
+            max_title_length = max(max_title_length, len(bite["title"]))
+            bites[bite["title"]] = (bite["level"], bite["slug"])
+            bite_mapping[bite["title"]] = bite["slug"]
+        padding = max_title_length + 10
+        choices = {
+            _format_bite_key(title, lvl, padding): slug
+            for title, (lvl, slug) in bites.items()
+        }
+
     bite_to_download = iterfzf(choices, multi=False, ansi=True)
 
     if bite_to_download is None:
@@ -393,6 +405,20 @@ def choose_bite(clear: bool = False, *, level: str | None = None) -> Bite:
     )
 
     return Bite(bite_to_download, slug)
+
+
+def all_bites(clear: bool = False, *, level: str | None = None) -> list[Bite]:
+    """Every Bite, or every Bite at one level, with no picker.
+
+    Args:
+        clear: Clear the requests cache before fetching.
+        level: Only return Bites at this difficulty level.
+
+    Returns:
+        A list of Bite objects.
+
+    """
+    return [Bite(b["title"], b["slug"]) for b in fetch_bites(clear, level=level)]
 
 
 def fetch_template_code(page: Page, bite: Bite) -> str | None:
@@ -438,20 +464,23 @@ def fetch_template_code(page: Page, bite: Bite) -> str | None:
     return response.json().get("code")
 
 
-def download_bite(
-    bite: Bite,
+def download_bites(
+    bites: list[Bite],
     config: dict,
     reset: bool = False,
-) -> str | None:
-    """Download the bite content from the PyBites platform.
+) -> Iterator[Bite]:
+    """Download several bites over a single login.
+
+    Logging in costs a browser launch and a round trip, so a bulk download
+    does it once and walks the list rather than paying it per Bite.
 
     Args:
+        bites: Bite objects to fetch.
         config: Dictionary containing the user's PyBites credentials.
-        bite: Bite object containing the title and url of the bite.
-        reset: Write the original template instead of your latest submission.
+        reset: Fetch the original template instead of your latest submission.
 
-    Returns:
-        The content of the bite from the platform.
+    Yields:
+        Each Bite with its platform_content populated.
 
     """
     with sync_playwright() as p:
@@ -471,10 +500,32 @@ def download_bite(
                     style=ConsoleStyle.SUGGESTION.value,
                 )
                 sys.exit()
-            page.goto(bite.url)
-            if reset:
-                bite.template_code = fetch_template_code(page, bite)
-            return page.content()
+            for bite in bites:
+                page.goto(bite.url)
+                if reset:
+                    bite.template_code = fetch_template_code(page, bite)
+                bite.platform_content = page.content()
+                yield bite
+
+
+def download_bite(
+    bite: Bite,
+    config: dict,
+    reset: bool = False,
+) -> str | None:
+    """Download the bite content from the PyBites platform.
+
+    Args:
+        config: Dictionary containing the user's PyBites credentials.
+        bite: Bite object containing the title and url of the bite.
+        reset: Write the original template instead of your latest submission.
+
+    Returns:
+        The content of the bite from the platform.
+
+    """
+    downloaded = list(download_bites([bite], config, reset=reset))
+    return downloaded[0].platform_content if downloaded else None
 
 
 def parse_bite_description(soup: BeautifulSoup) -> str:
@@ -504,7 +555,7 @@ def create_bite_dir(
     bite: Bite,
     config: dict,
     force: bool = False,
-) -> None:
+) -> bool:
     """Create a directory for the bite and write the bite content to it.
 
     Args:
@@ -513,7 +564,7 @@ def create_bite_dir(
         force: Whether to overwrite the directory if it already exists.
 
     Returns:
-        None
+        True if the bite was written, False if it was skipped.
 
     """
     dest_path = bite.bite_slug_to_dir(config["PYBITES_REPO"])
@@ -526,7 +577,7 @@ def create_bite_dir(
         console.print(
             "Use the --force option to overwite.", style=ConsoleStyle.SUGGESTION.value
         )
-        return
+        return False
 
     soup = BeautifulSoup(bite.platform_content, "html.parser")
 
@@ -544,7 +595,7 @@ def create_bite_dir(
             "Please make sure that your credentials are valid and you have access to this bite.",
             style=ConsoleStyle.SUGGESTION.value,
         )
-        sys.exit()
+        return False
 
     try:
         makedirs(dest_path)
@@ -561,6 +612,7 @@ def create_bite_dir(
     console.print(
         f"Wrote {bite.title} to: {dest_path}", style=ConsoleStyle.SUCCESS.value
     )
+    return True
 
 
 def extract_test_report(validate_result: str) -> str:
