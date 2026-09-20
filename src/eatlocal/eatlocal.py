@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from os import environ, makedirs
 from pathlib import Path
+from textwrap import dedent
 from typing import FrozenSet
 
 import install_playwright
@@ -514,6 +515,29 @@ def create_bite_dir(
     )
 
 
+def extract_test_report(validate_result: str) -> str:
+    """Pull the pytest run out of the platform's feedback panel.
+
+    The panel leads with a verdict line and trails with navigation chrome; only
+    the pytest session between them says anything about why a Bite failed.
+
+    Args:
+        validate_result: Text content of the platform's #feedback element.
+
+    Returns:
+        The pytest output, or the whole feedback panel if the session header is
+        missing (the platform errored before pytest ran).
+
+    """
+    start = validate_result.find("test session starts")
+    if start == -1:
+        return validate_result.strip()
+    start = validate_result.rfind("\n", 0, start) + 1
+    end = validate_result.find("View Solution", start)
+    report = validate_result[start:] if end == -1 else validate_result[start:end]
+    return dedent(report).strip()
+
+
 def submit_bite(
     bite: str,
     config: dict,
@@ -571,6 +595,7 @@ def submit_bite(
         console.print(
             ":warning: Code did not pass the tests.", style=ConsoleStyle.WARNING.value
         )
+        console.print(extract_test_report(validate_result))
 
     if Confirm.ask(f"Would you like to open {bite.title} in your browser?"):
         webbrowser.open(bite.url)

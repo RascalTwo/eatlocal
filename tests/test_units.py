@@ -13,6 +13,7 @@ from eatlocal.eatlocal import (
     choose_local_bite,
     create_bite_dir,
     display_bite,
+    extract_test_report,
     get_credentials,
     load_config,
     set_local_dir,
@@ -235,3 +236,46 @@ def test_get_credentials(mock_prompt) -> None:
     mock_prompt.side_effect = ["test_username", "test_password", "test_password"]
     actual = get_credentials()
     assert actual == expected
+
+
+PASSING_FEEDBACK = """
+                Congrats, you passed this Bite earning 2 points 🎉
+                ========== test session starts ==========
+                collected 2 items
+                test_summing.py ..                              [100%]
+                ========== 2 passed in 0.02s ==========
+
+                View SolutionPython Beginner1/20Next →
+"""
+
+FAILING_FEEDBACK = """
+                ========== test session starts ==========
+                collected 2 items
+                test_summing.py F.                              [ 50%]
+                ============== FAILURES ==============
+                E       assert None == 5050
+                ========== 1 failed, 1 passed in 0.03s ==========
+
+                View SolutionNext →
+"""
+
+
+def test_extract_test_report_keeps_the_failure() -> None:
+    """A failed submit should say what pytest actually complained about."""
+    report = extract_test_report(FAILING_FEEDBACK)
+    assert report.startswith("========== test session starts")
+    assert "assert None == 5050" in report
+    assert "1 failed, 1 passed" in report
+    assert "View Solution" not in report
+
+
+def test_extract_test_report_drops_the_verdict_line() -> None:
+    """The Congrats banner is already printed by the caller."""
+    report = extract_test_report(PASSING_FEEDBACK)
+    assert "Congrats" not in report
+    assert report.startswith("========== test session starts")
+
+
+def test_extract_test_report_falls_back_to_whole_panel() -> None:
+    """If pytest never ran, show whatever the platform did say."""
+    assert extract_test_report("  Server error, try again  ") == "Server error, try again"
