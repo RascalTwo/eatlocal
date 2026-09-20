@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+  <body>
+    <div id="bite-description">
+      <h2>Fastapi hello world</h2>
+      <div class="flex">Pybites</div>
+      <!-- end author and learning paths -->
+      <p>Create a FastAPI app with a single endpoint.</p>
+      <p class="hidden" id="filename">app</p>
+    </div>
+    <textarea id="python-editor">from fastapi import FastAPI
+
+app = FastAPI()
+</textarea>
+    <textarea id="test-python-editor">from app import app
+</textarea>
+  </body>
+</html>

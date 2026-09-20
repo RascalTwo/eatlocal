@@ -178,6 +178,30 @@ def test_create_bite_dir(
     shutil.rmtree(bite_dir)
 
 
+def test_create_bite_dir_keeps_whole_filename(
+    testing_config,
+) -> None:
+    """The module name is a suffix to strip, not a set of characters.
+
+    `str.strip(".py")` ate any leading/trailing `.`, `p` or `y`, so a Bite whose
+    module is `app` landed on disk as `a.py` and the tests could not import it.
+    """
+    with open(Path("./tests/testing_content/fastapi_content.txt"), "r") as f:
+        platform_content = f.read()
+    bite = Bite("Fastapi hello world", "fastapi-hello-world")
+    bite.platform_content = platform_content
+    bite_dir = Path(testing_config["PYBITES_REPO"]) / "fastapi-hello-world"
+
+    try:
+        create_bite_dir(bite, testing_config)
+
+        assert (bite_dir / "app.py").exists()
+        assert (bite_dir / "test_app.py").exists()
+        assert not (bite_dir / "a.py").exists()
+    finally:
+        shutil.rmtree(bite_dir, ignore_errors=True)
+
+
 def test_create_bite_dir_without_force(testing_config, capsys):
     create_bite_dir(LOCAL_TEST_BITE, testing_config)
     output = capsys.readouterr().out

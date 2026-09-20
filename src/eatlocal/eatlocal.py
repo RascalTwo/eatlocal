@@ -485,7 +485,7 @@ def create_bite_dir(
     try:
         code = soup.find(id="python-editor").text
         tests = soup.find(id="test-python-editor").text
-        file_name = soup.find(id="filename").text.strip(".py")
+        file_name = soup.find(id="filename").text.strip().removesuffix(".py")
     except AttributeError:
         console.print(
             f":warning: Unable to access {bite.title} content on the platform.",
