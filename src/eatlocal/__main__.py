@@ -77,12 +77,19 @@ def download(
         "-l",
         help="Filter bites by difficulty level.",
     ),
+    reset: bool = typer.Option(
+        False,
+        "--reset",
+        "-r",
+        is_flag=True,
+        help="Write the original template instead of your latest submission.",
+    ),
 ) -> None:
     """Download and extract bite code from pybitesplatform.com."""
     config = load_config(EATLOCAL_HOME / ".env")
     bite = choose_bite(clear, level=level)
     with Status("Downloading bite..."):
-        bite.platform_content = download_bite(bite, config)
+        bite.platform_content = download_bite(bite, config, reset=reset)
         if bite.platform_content is None:
             return
     create_bite_dir(bite, config, force)

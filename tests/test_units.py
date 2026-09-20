@@ -14,6 +14,7 @@ from eatlocal.eatlocal import (
     create_bite_dir,
     display_bite,
     extract_test_report,
+    fetch_template_code,
     get_credentials,
     load_config,
     set_local_dir,
@@ -279,3 +280,61 @@ def test_extract_test_report_drops_the_verdict_line() -> None:
 def test_extract_test_report_falls_back_to_whole_panel() -> None:
     """If pytest never ran, show whatever the platform did say."""
     assert extract_test_report("  Server error, try again  ") == "Server error, try again"
+
+
+
+def test_fetch_template_code_uses_the_reset_dropdown() -> None:
+    """Reset goes through the platform's own control, not a hand-built URL.
+
+    Selecting it also lets the page clear the draft it caches in localStorage.
+    """
+    page = MagicMock()
+    response = MagicMock(ok=True)
+    response.json.return_value = {
+        "code": "def sum_numbers(numbers=None):\r\n    pass",
+        "reset": True,
+    }
+    page.expect_response.return_value.__enter__.return_value.value = response
+
+    code = fetch_template_code(page, SUMMING_TEST_BITE)
+
+    page.select_option.assert_called_once_with("#submissions", "reset")
+    assert code == "def sum_numbers(numbers=None):\r\n    pass"
+
+
+def test_fetch_template_code_without_a_reset_control(capsys) -> None:
+    """No dropdown means nothing to reset; say so and keep what we have."""
+    page = MagicMock()
+    page.query_selector.return_value = None
+
+    assert fetch_template_code(page, SUMMING_TEST_BITE) is None
+    page.select_option.assert_not_called()
+    assert "No reset control" in capsys.readouterr().out
+
+
+def test_fetch_template_code_survives_a_bad_response(capsys) -> None:
+    """A platform hiccup should not lose the code we already have."""
+    page = MagicMock()
+    page.expect_response.return_value.__enter__.return_value.value = MagicMock(ok=False)
+
+    assert fetch_template_code(page, SUMMING_TEST_BITE) is None
+    assert "Unable to reset" in capsys.readouterr().out
+
+
+
+def test_create_bite_dir_prefers_the_template(testing_config) -> None:
+    """With --reset the template wins over the submission in the editor."""
+    with open(Path("./tests/testing_content/fastapi_content.txt"), "r") as f:
+        platform_content = f.read()
+    bite = Bite("Fastapi hello world", "fastapi-hello-world")
+    bite.platform_content = platform_content
+    bite.template_code = "# Enter your code below this line\n"
+    bite_dir = Path(testing_config["PYBITES_REPO"]) / "fastapi-hello-world"
+
+    try:
+        create_bite_dir(bite, testing_config)
+        written = (bite_dir / "app.py").read_text()
+        assert written == "# Enter your code below this line\n"
+        assert "FastAPI()" not in written
+    finally:
+        shutil.rmtree(bite_dir, ignore_errors=True)

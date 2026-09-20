@@ -68,6 +68,7 @@ class Bite:
     title: str = None
     slug: str = None
     platform_content: str = None
+    template_code: str = None
 
     @property
     def url(self) -> str:
@@ -394,15 +395,60 @@ def choose_bite(clear: bool = False, *, level: str | None = None) -> Bite:
     return Bite(bite_to_download, slug)
 
 
+def fetch_template_code(page: Page, bite: Bite) -> str | None:
+    """Reset the editor on a Bite page and return the template it restores.
+
+    A Bite page loads your most recent submission into the editor, so a Bite
+    you have already solved comes back down as your own answer. The
+    Submissions dropdown's "Reset Bite" entry is the platform's own way back
+    to the template; drive that rather than reimplementing it, so the page
+    also clears the cached draft it keeps in localStorage.
+
+    The dropdown answers with JSON that page script hands to CodeMirror, and
+    CodeMirror never writes back to the textarea, so read the code off the
+    response instead of out of the DOM.
+
+    Args:
+        page: A logged-in Playwright page, already on the Bite.
+        bite: Bite object whose template is wanted.
+
+    Returns:
+        The template code, or None if the platform did not supply one.
+
+    """
+    if page.query_selector("#submissions") is None:
+        console.print(
+            f":warning: No reset control on {bite.title}; keeping the code on the platform.",
+            style=ConsoleStyle.WARNING.value,
+        )
+        return None
+
+    with page.expect_response(
+        lambda response: "/submissions" in response.url
+    ) as response_info:
+        page.select_option("#submissions", "reset")
+    response = response_info.value
+
+    if not response.ok:
+        console.print(
+            f":warning: Unable to reset {bite.title}; keeping the code on the platform.",
+            style=ConsoleStyle.WARNING.value,
+        )
+        return None
+    return response.json().get("code")
+
+
 def download_bite(
     bite: Bite,
     config: dict,
+    reset: bool = False,
 ) -> str | None:
     """Download the bite content from the PyBites platform.
 
     Args:
         config: Dictionary containing the user's PyBites credentials.
         bite: Bite object containing the title and url of the bite.
+        reset: Write the original template instead of your latest submission.
 
     Returns:
         The content of the bite from the platform.
@@ -426,6 +472,8 @@ def download_bite(
                 )
                 sys.exit()
             page.goto(bite.url)
+            if reset:
+                bite.template_code = fetch_template_code(page, bite)
             return page.content()
 
 
@@ -484,7 +532,7 @@ def create_bite_dir(
 
     bite_description = parse_bite_description(soup)
     try:
-        code = soup.find(id="python-editor").text
+        code = bite.template_code or soup.find(id="python-editor").text
         tests = soup.find(id="test-python-editor").text
         file_name = soup.find(id="filename").text.strip().removesuffix(".py")
     except AttributeError:
