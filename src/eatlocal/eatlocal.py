@@ -1,6 +1,7 @@
 """download and submit bites"""
 
 import json
+import re
 import sys
 import webbrowser
 from dataclasses import dataclass
@@ -78,7 +79,15 @@ class Bite:
     def bite_slug_to_dir(self, pybites_repo: Path) -> Path:
         return Path(pybites_repo).resolve() / self.slug
 
-    def fetch_local_code(self, config: dict) -> None:
+    def fetch_local_code(self, config: dict, prefer_tests: bool = False) -> None:
+        """Read the file that holds your answer to this Bite.
+
+        Args:
+            config: Dictionary containing the user's PyBites credentials.
+            prefer_tests: Read test_<module>.py, for Bites where the tests are
+                what you write.
+
+        """
         bite_dir = self.bite_slug_to_dir(config["PYBITES_REPO"])
         if not bite_dir.is_dir():
             console.print(
@@ -94,7 +103,7 @@ class Bite:
             python_file = [
                 file
                 for file in list(bite_dir.glob("*.py"))
-                if not file.name.startswith("test_")
+                if file.name.startswith("test_") == prefer_tests
             ][0]
 
             with open(python_file, encoding="utf-8") as file:
@@ -551,6 +560,33 @@ def parse_bite_description(soup: BeautifulSoup) -> str:
     return bite_description_str
 
 
+def is_test_writing_bite(code: str, tests: str, file_name: str) -> bool:
+    """True when a Bite asks you to write the tests instead of the code.
+
+    A few Bites hand you a working implementation and ask for its test suite.
+    The platform still labels the editor you type into "Code", so its contents
+    belong in test_<module>.py while the "Tests" panel holds the module. Taken
+    at face value the two files land swapped, the module imports itself, and
+    nothing runs.
+
+    Spot them by the editor importing the module the Bite is named for, while
+    the panel that claims to hold the tests never mentions it.
+
+    Args:
+        code: Contents of the platform's Code editor.
+        tests: Contents of the platform's Tests panel.
+        file_name: The Bite's module name, without the .py.
+
+    Returns:
+        True if code and tests need swapping before they are written out.
+
+    """
+    imports_module = rf"^\s*(?:from|import)\s+{re.escape(file_name)}\b"
+    return bool(re.search(imports_module, code, re.M)) and not re.search(
+        imports_module, tests, re.M
+    )
+
+
 def create_bite_dir(
     bite: Bite,
     config: dict,
@@ -586,6 +622,8 @@ def create_bite_dir(
         code = bite.template_code or soup.find(id="python-editor").text
         tests = soup.find(id="test-python-editor").text
         file_name = soup.find(id="filename").text.strip().removesuffix(".py")
+        if is_test_writing_bite(code, tests, file_name):
+            code, tests = tests, code
     except AttributeError:
         console.print(
             f":warning: Unable to access {bite.title} content on the platform.",
@@ -676,6 +714,13 @@ def submit_bite(
                     return
                 page.goto(bite.url)
                 page.wait_for_url(bite.url)
+                if is_test_writing_bite(
+                    page.input_value("#python-editor"),
+                    page.input_value("#test-python-editor"),
+                    page.text_content("#filename").strip().removesuffix(".py"),
+                ):
+                    # what you write for this Bite lives in the test file
+                    bite.fetch_local_code(config, prefer_tests=True)
                 page.evaluate(
                     f"""document.querySelector('.CodeMirror').CodeMirror.setValue({
                         repr(bite.local_code)})"""

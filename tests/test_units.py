@@ -17,6 +17,7 @@ from eatlocal.eatlocal import (
     display_bite,
     extract_test_report,
     fetch_template_code,
+    is_test_writing_bite,
     get_credentials,
     load_config,
     set_local_dir,
@@ -408,3 +409,61 @@ def test_create_bite_dir_reports_success(testing_config) -> None:
         assert create_bite_dir(bite, testing_config) is True
     finally:
         shutil.rmtree(bite_dir, ignore_errors=True)
+
+
+IMPLEMENTATION = "from functools import cache\n\n\ndef fib(n):\n    return n\n"
+TEST_STUB = "from fibonacci import fib\n\n# write one or more pytest functions below\n"
+
+
+def test_spots_a_write_the_tests_bite() -> None:
+    """The editor imports the module; the "tests" panel is the module."""
+    assert is_test_writing_bite(TEST_STUB, IMPLEMENTATION, "fibonacci")
+
+
+def test_leaves_ordinary_bites_alone() -> None:
+    """Normally the stub is the module and the tests import it."""
+    code = "def sum_numbers(numbers=None):\n    pass\n"
+    tests = "from summing import sum_numbers\n\n\ndef test_it():\n    assert True\n"
+    assert not is_test_writing_bite(code, tests, "summing")
+
+
+def test_detection_needs_both_signals() -> None:
+    """A stub importing its own module is not enough if the tests also do."""
+    code = "from summing import helper\n"
+    tests = "from summing import sum_numbers\n"
+    assert not is_test_writing_bite(code, tests, "summing")
+
+
+def test_create_bite_dir_unswaps_a_write_the_tests_bite(testing_config) -> None:
+    """The implementation must land in the module, not in the test file."""
+    with open(Path("./tests/testing_content/write_tests_content.txt"), "r") as f:
+        platform_content = f.read()
+    bite = Bite("Write tests for fibonacci", "write-tests-for-fibonacci")
+    bite.platform_content = platform_content
+    bite_dir = Path(testing_config["PYBITES_REPO"]) / "write-tests-for-fibonacci"
+
+    try:
+        create_bite_dir(bite, testing_config)
+        module = (bite_dir / "fibonacci.py").read_text()
+        test = (bite_dir / "test_fibonacci.py").read_text()
+        assert "def fib(n):" in module
+        assert "from fibonacci import fib" not in module, "module imported itself"
+        assert "from fibonacci import fib" in test
+    finally:
+        shutil.rmtree(bite_dir, ignore_errors=True)
+
+
+def test_fetch_local_code_can_prefer_the_test_file(tmp_path) -> None:
+    """Submitting a write-the-tests Bite sends test_<module>.py."""
+    bite_dir = tmp_path / "write-tests-for-fibonacci"
+    bite_dir.mkdir()
+    (bite_dir / "fibonacci.py").write_text("def fib(n):\n    return n\n")
+    (bite_dir / "test_fibonacci.py").write_text("def test_fib():\n    assert True\n")
+    bite = Bite("Write tests for fibonacci", "write-tests-for-fibonacci")
+    config = {"PYBITES_REPO": tmp_path}
+
+    bite.fetch_local_code(config, prefer_tests=True)
+    assert bite.local_code == "def test_fib():\n    assert True\n"
+
+    bite.fetch_local_code(config)
+    assert bite.local_code == "def fib(n):\n    return n\n"

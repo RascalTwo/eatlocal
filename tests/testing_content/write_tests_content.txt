@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <body>
+    <div id="bite-description">
+      <h2>Write tests for fibonacci</h2>
+      <div class="flex">Pybites</div>
+      <!-- end author and learning paths -->
+      <p>Write one or more pytest functions for the given implementation.</p>
+      <p class="hidden" id="filename">fibonacci</p>
+    </div>
+    <textarea id="python-editor">from fibonacci import fib
+
+# write one or more pytest functions below, they need to start with test_
+</textarea>
+    <textarea id="test-python-editor">from functools import cache
+
+
+@cache
+def fib(n):
+    if n < 0:
+        raise ValueError
+    elif n in (0, 1):
+        return n
+    return fib(n - 1) + fib(n - 2)
+</textarea>
+  </body>
+</html>
