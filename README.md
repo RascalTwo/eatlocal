@@ -74,6 +74,22 @@ eatlocal download --level Intermediate
 eatlocal download --level Advanced
 ```
 
+Download a whole series at once with `--all`, which skips the picker. It pairs with `--level`, and logs in once for the run rather than once per bite. Bites your account cannot reach are skipped and counted rather than stopping the run.
+
+```bash
+# every newbie bite in one pass
+eatlocal download --all --level newbie
+
+# the entire catalogue
+eatlocal download --all
+```
+
+A bite page shows your most recent submission, so re-downloading one you have already solved gives you your own answer back. Use `--reset` to write the original template instead.
+
+```bash
+eatlocal download --reset
+```
+
 If you want to force a re-download of a given bite use the `--force` flag. This will overwrite the bite directory.
 
 ```bash
